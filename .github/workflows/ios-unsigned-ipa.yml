@@ -1,0 +1,91 @@
+name: iOS unsigned IPA
+
+# 目的：在没有 Mac 的机器上，也能拿到一个可侧载安装的 iOS 包。
+#
+# 原理：借 GitHub 免费的 macOS runner 跑 flutter build ios --no-codesign，
+#       把产物 Runner.app 打成未签名 .ipa 作为 Artifact 供下载，
+#       再由你在 Windows 上用 Sideloadly / AltStore 以自己的 Apple ID 重签名装进 iPhone。
+#
+# 与仓库自带的 .github/workflows/ios-smoke.yml 的区别：
+#   ios-smoke.yml 只验证工程能构建（--no-codesign 后结束，不留产物）；
+#   本文件在同样一条命令之后，额外做「打包成 .ipa」+「上传 Artifact」两件事。
+#
+# 用法：把本文件放到 fork 仓库的 .github/workflows/ 下。
+#   - 推送到 main / master 时改动本文件 → 自动触发（"提交即构建"，无需点按钮）
+#   - 也可在 Actions 页面手动 Run workflow
+#   - 或推一个 ios-* 的 tag 触发
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/ios-unsigned-ipa.yml"
+    tags:
+      - "ios-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show runner Xcode
+        run: xcodebuild -version
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Info.plist regression tests
+        run: flutter test test/ios_info_plist_test.dart --reporter expanded
+
+      - name: Build iOS (release, no codesign)
+        run: flutter build ios --no-codesign --release
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::未找到 $APP_PATH，构建产物路径可能随 Flutter 版本变化"
+            find build/ios -maxdepth 3 -name "*.app" -print || true
+            exit 1
+          fi
+          rm -rf build/ipa
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+          cd build/ipa
+          zip -qry S1er-unsigned.ipa Payload
+          echo "--- ipa 内容前 20 项 ---"
+          unzip -l S1er-unsigned.ipa | head -20
+          echo "--- 体积 ---"
+          ls -lh S1er-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: s1er-unsigned-ipa
+          path: build/ipa/S1er-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
