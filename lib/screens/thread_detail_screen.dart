@@ -1241,6 +1241,27 @@ class _ThreadDetailScreenState extends ConsumerState<ThreadDetailScreen> {
     return false;
   }
 
+  /// iOS 左边缘内滑 = 左上角返回按钮：完全复用返回按钮的语义
+  /// （分享多选→退出多选；楼内跳转→回上一位置；嵌入态→onClose；否则出栈）。
+  Future<void> _handleLeadingEdgeBack() async {
+    if (_shareSelectMode) {
+      _exitShareSelectMode();
+      return;
+    }
+    if (ref.read(inThreadJumpStackProvider(widget.tid)).isNotEmpty) {
+      await _restoreInThreadJump();
+      return;
+    }
+    _flushProgressBeforeLeave();
+    if (widget.onClose != null) {
+      widget.onClose!();
+      return;
+    }
+    if (context.canPop()) {
+      context.pop();
+    }
+  }
+
   /// 同 tid 站内 `replace(?pid=)` 不 remount；需跟随路由 intent 再定位。
   void _onOpenIntentChanged(
     ThreadOpenIntent? previous,
@@ -1470,6 +1491,8 @@ class _ThreadDetailScreenState extends ConsumerState<ThreadDetailScreen> {
                   currentPage: state.currentPage,
                   totalPages: state.totalPages,
                   adjacentSkeletonStyle: S1SwipeAdjacentSkeletonStyle.postItem,
+                  leadingEdgeBack: true,
+                  onLeadingEdgeBack: _handleLeadingEdgeBack,
                   onScrollMetricsChanged: _onScrollMetricsChanged,
                   onPageChanged: _goToPage,
                   onTerminalRefresh: _shareSelectMode ? null : _refreshFromEnd,

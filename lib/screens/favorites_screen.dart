@@ -190,6 +190,7 @@ class _FavoriteListBody extends ConsumerWidget {
               key: swipeKey,
               currentPage: state.currentPage,
               totalPages: state.totalPages,
+              leadingEdgeBack: true,
               onPageChanged: (page) => ref
                   .read(favoriteListProvider(segment).notifier)
                   .goToPage(page),

@@ -207,6 +207,7 @@ class _ThreadList extends ConsumerWidget {
               child: S1SwipePagination(
                 currentPage: state.page,
                 totalPages: state.totalPages,
+                leadingEdgeBack: true,
                 onPageChanged: (page) => ref
                     .read(userSpaceThreadsProvider(params).notifier)
                     .goToPage(page),
@@ -281,6 +282,7 @@ class _ReplyList extends ConsumerWidget {
               child: S1SwipePagination(
                 currentPage: state.page,
                 totalPages: state.totalPages,
+                leadingEdgeBack: true,
                 onPageChanged: (page) => ref
                     .read(userSpaceRepliesProvider(params).notifier)
                     .goToPage(page),

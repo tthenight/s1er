@@ -41,6 +41,8 @@ class S1SwipePagination extends StatefulWidget {
     this.enabled = true,
     this.showPagingIndicator = true,
     this.adjacentSkeletonStyle = S1SwipeAdjacentSkeletonStyle.generic,
+    this.leadingEdgeBack = false,
+    this.onLeadingEdgeBack,
   });
 
   /// 当前页码（1-based）。
@@ -81,6 +83,19 @@ class S1SwipePagination extends StatefulWidget {
   /// 左右侧槽横滑预览用的列表骨架样式（不含真实邻页数据）。
   final S1SwipeAdjacentSkeletonStyle adjacentSkeletonStyle;
 
+  /// 是否启用「左边缘内滑 = 返回」。
+  ///
+  /// 启用后，内容区最左侧 [S1SwipePaginationState._leadingEdgeBackWidth]
+  /// 逻辑像素成为返回热区：从热区起手的右滑不再触发翻页，而是执行返回
+  /// （默认 [Navigator.maybePop]，等同系统返回；特殊页面可用
+  /// [onLeadingEdgeBack] 覆盖为各自返回按钮的语义）。热区之外左右滑动仍翻页。
+  ///
+  /// 仅 iOS 生效：Android 的边缘手势由系统返回接管，无需也不应抢占。
+  final bool leadingEdgeBack;
+
+  /// 自定义返回动作；为 null 时默认 `Navigator.maybePop(context)`。
+  final VoidCallback? onLeadingEdgeBack;
+
   @override
   State<S1SwipePagination> createState() => S1SwipePaginationState();
 }
@@ -88,12 +103,16 @@ class S1SwipePagination extends StatefulWidget {
 class S1SwipePaginationState extends State<S1SwipePagination> {
   static const int _centerSlot = 1;
 
+  /// 左边缘返回热区宽度（逻辑像素），与 iOS 系统返回手势热区量级一致。
+  static const double _leadingEdgeBackWidth = 28;
+
   late PageController _pageController;
   late ScrollController _scrollController;
   late BoundaryFeedbackController _boundaryFeedback;
   bool _lastPageRefreshDispatchedThisGesture = false;
   bool _isPaging = false;
   int? _pendingPage;
+  double _leadingEdgeDragDx = 0;
 
   @override
   void initState() {
@@ -241,6 +260,40 @@ class S1SwipePaginationState extends State<S1SwipePagination> {
   bool get _canSwipeToNext => widget.currentPage < widget.totalPages;
 
   bool get _usePageView => widget.enabled && widget.totalPages > 1;
+
+  /// 左边缘返回热区仅 iOS 启用（Android 由系统边缘返回接管）。
+  bool _useLeadingEdgeBack(BuildContext context) =>
+      widget.leadingEdgeBack &&
+      Theme.of(context).platform == TargetPlatform.iOS;
+
+  /// 覆盖在内容区最左缘的透明热区：抢在 [PageView] 之前认领横向手势。
+  ///
+  /// 必须是 Stack 中最上层的子级——命中测试自顶向下，先入竞技场者胜，
+  /// 这样才能从 PageView 手里夺回左边缘。translucent 让纵滑/点按继续
+  /// 透传给底下的列表。
+  Widget _buildLeadingEdgeBackStrip(BuildContext context) {
+    final onBack = widget.onLeadingEdgeBack ??
+        () => Navigator.maybePop(context);
+    return Positioned(
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: _leadingEdgeBackWidth,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) => _leadingEdgeDragDx = 0,
+        onHorizontalDragUpdate: (details) =>
+            _leadingEdgeDragDx += details.delta.dx,
+        onHorizontalDragEnd: (details) {
+          final dx = _leadingEdgeDragDx;
+          _leadingEdgeDragDx = 0;
+          final velocity = details.primaryVelocity ?? 0;
+          if (dx > 16 || velocity > 180) onBack();
+        },
+        onHorizontalDragCancel: () => _leadingEdgeDragDx = 0,
+      ),
+    );
+  }
 
   ScrollPhysics get _pagePhysics => BoundedSwipePaginationPhysics(
         getCurrentPage: () => widget.currentPage,
@@ -392,25 +445,32 @@ class S1SwipePaginationState extends State<S1SwipePagination> {
             color: scheme.primary,
           ),
         Expanded(
-          child: Semantics(
-            label: '左右滑动可翻页',
-            child: NotificationListener<ScrollNotification>(
-              onNotification: _onPageViewScrollNotification,
-              child: PageView(
-                controller: _pageController,
-                onPageChanged: _onSlotChanged,
-                // 使用自定义 PageScrollPhysics 处理吸附，避免默认 round(0.5)==1
-                // 导致中心页向右甩动无法翻上一页。
-                pageSnapping: false,
-                physics: _isPaging
-                    ? const NeverScrollableScrollPhysics()
-                    : _pagePhysics,
-                children: List.generate(
-                  3,
-                  (index) => _buildSlotContent(context, index),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Semantics(
+                label: '左右滑动可翻页',
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: _onPageViewScrollNotification,
+                  child: PageView(
+                    controller: _pageController,
+                    onPageChanged: _onSlotChanged,
+                    // 使用自定义 PageScrollPhysics 处理吸附，避免默认 round(0.5)==1
+                    // 导致中心页向右甩动无法翻上一页。
+                    pageSnapping: false,
+                    physics: _isPaging
+                        ? const NeverScrollableScrollPhysics()
+                        : _pagePhysics,
+                    children: List.generate(
+                      3,
+                      (index) => _buildSlotContent(context, index),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              if (_useLeadingEdgeBack(context))
+                _buildLeadingEdgeBackStrip(context),
+            ],
           ),
         ),
       ],
@@ -431,6 +491,12 @@ class S1SwipePaginationState extends State<S1SwipePagination> {
         feedback: _boundaryFeedback,
         onRefresh: onRefresh,
         child: body,
+      );
+    }
+    if (_useLeadingEdgeBack(context)) {
+      body = Stack(
+        fit: StackFit.expand,
+        children: [body, _buildLeadingEdgeBackStrip(context)],
       );
     }
     return body;

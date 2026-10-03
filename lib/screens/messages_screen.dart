@@ -180,6 +180,7 @@ class _NoticeListBody extends ConsumerWidget {
               key: swipeKey,
               currentPage: state.currentPage,
               totalPages: state.totalPages,
+              leadingEdgeBack: true,
               onPageChanged: (page) =>
                   ref.read(noticeListProvider.notifier).goToPage(page),
               pageBuilder: (context, scrollController) => RefreshIndicator(
