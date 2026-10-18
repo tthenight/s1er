@@ -194,6 +194,7 @@ flutter run -d chrome --dart-define=TALKER_LOG_LEVEL=all --dart-define=TALKER_MA
 | `IMAGE_UPLOAD_TIMEOUT` | int | `120` | 插图上传 send/receive 超时（秒；外链 `/ext-upload` 与论坛 `misc.php` swfupload 同上限） |
 | `UPDATE_MANIFEST_URL` | String | jsDelivr CDN `docs/release/latest.json` | 应用升级清单主 URL（并发备用 GitHub raw） |
 | `DISTRIBUTION` | String | `github` | 分发渠道：`github` / `play`（影响升级 CTA 链接） |
+| `UPDATE_ALLOW_LOCAL_HOST` | bool | `false` | **仅 debug/profile 构建**：允许升级下载走本地 http 环回主机（`127.0.0.1`/`localhost`），用于本地端到端测试覆盖更新；release 恒不生效 |
 | `SENTRY_DSN` | String | 空 | 非空时启用 Sentry；详见 `docs/sentry-setup.md` |
 | `SENTRY_TRACES_SAMPLE_RATE` | String | `0` | 性能采样 0–1；默认仅错误 |
 | `SENTRY_DEBUG_UPLOAD` | bool | `false` | debug 构建是否实际上传 |
@@ -313,3 +314,15 @@ flutter run -d chrome --dart-define=TALKER_LOG_LEVEL=all --dart-define=TALKER_MA
   - 确需登录时，一次成功即可；`scripts/proxy_server.dart` 会在内存中保存已登录的 S1 Cookie 并自动附加到后续所有上游请求，因此**登录一次后无需重复登录**，浏览器端刷新页面即可通过 `checkSession()` 复用会话。
   - 切勿写循环/压测脚本调用登录接口；`S1HttpClient` 自带每秒 2 请求限速，不要绕过。
   - 凭据只放本机环境变量或私密 CI secrets，永不提交。
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `Shirolin/s1er`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

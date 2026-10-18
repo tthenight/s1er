@@ -27,6 +27,7 @@ class UpdateEvaluation {
     this.userMessage,
     this.netdiskUrl = '',
     this.canInAppDownload = false,
+    this.blockedReason,
   });
 
   final UpdateAvailability availability;
@@ -39,6 +40,9 @@ class UpdateEvaluation {
 
   /// Android APK 或 Windows ZIP 的应用内更新。
   final bool canInAppDownload;
+
+  /// 上次自动应用该版本失败的原因（若有）；手动检查时提示、自动检查时退避。
+  final String? blockedReason;
 
   /// 是否应展示升级 Dialog（启动自动 / 手动均适用）。
   final bool shouldShowDialog;
@@ -84,6 +88,7 @@ UpdateEvaluation evaluateUpdate({
   Duration cooldown = UpdatePromptStore.cooldown,
   String netdiskUrl = '',
   bool canInAppDownload = false,
+  BlockedUpdate? blocked,
 }) {
   final local = localVersion.trim();
 
@@ -126,6 +131,22 @@ UpdateEvaluation evaluateUpdate({
       canInAppDownload: canInAppDownload,
       shouldShowDialog: false,
       userMessage: manual ? '已忽略此版本的更新提示' : null,
+    );
+  }
+
+  // 上次应用该版本失败（已回滚）→ 自动检查退避，手动检查仍展示并带原因。
+  if (blocked != null &&
+      blocked.version.isNotEmpty &&
+      Semver.compare(blocked.version, manifest.latest) == 0) {
+    return UpdateEvaluation(
+      availability: UpdateAvailability.optional,
+      localVersion: local,
+      manifest: manifest,
+      downloadUrl: downloadUrl,
+      netdiskUrl: netdiskUrl,
+      canInAppDownload: canInAppDownload,
+      blockedReason: blocked.reason,
+      shouldShowDialog: manual,
     );
   }
 
@@ -200,17 +221,18 @@ final updateCheckServiceProvider = Provider<UpdateCheckService>((ref) {
   return UpdateCheckService();
 });
 
+/// 尽力读取 [settingsStoreProvider]；未初始化（如部分 widget 测试）时返回 null。
+SettingsStore? trySettingsStore(Ref ref) {
+  try {
+    return ref.read(settingsStoreProvider);
+  } on Object {
+    return null;
+  }
+}
+
 class UpdateCheckNotifier extends Notifier<UpdateCheckState> {
   @override
   UpdateCheckState build() => const UpdateCheckState();
-
-  SettingsStore? _tryStore() {
-    try {
-      return ref.read(settingsStoreProvider);
-    } on Object {
-      return null;
-    }
-  }
 
   UpdateCheckService get _service => ref.read(updateCheckServiceProvider);
 
@@ -278,7 +300,13 @@ class UpdateCheckNotifier extends Notifier<UpdateCheckState> {
     if (!ref.mounted) {
       throw const UpdateCheckException('检查已取消');
     }
-    final store = _tryStore();
+    final store = trySettingsStore(ref);
+    // 本地已追平（甚至超过）上次应用失败的版本 → 该退避记录已过期，清掉。
+    var blocked = UpdatePromptStore.blocked(store);
+    if (blocked != null && Semver.compare(info.version, blocked.version) >= 0) {
+      UpdatePromptStore.clearBlocked(store);
+      blocked = null;
+    }
     final downloadUrl = UpdateCheckService.resolveDownloadUrl(
       manifest,
       distribution: EnvConfig.distribution,
@@ -305,6 +333,7 @@ class UpdateCheckNotifier extends Notifier<UpdateCheckState> {
       ignoredVersion: UpdatePromptStore.ignoredVersion(store),
       lastPromptVersion: UpdatePromptStore.lastPromptVersion(store),
       lastPromptMs: UpdatePromptStore.lastPromptMs(store),
+      blocked: blocked,
       now: now,
       manual: manual,
     );
@@ -339,14 +368,14 @@ class UpdateCheckNotifier extends Notifier<UpdateCheckState> {
     }
     final now = clock?.call() ?? DateTime.now();
     UpdatePromptStore.setLastPrompt(
-      store: _tryStore(),
+      store: trySettingsStore(ref),
       version: version,
       ms: now.millisecondsSinceEpoch,
     );
   }
 
   void ignoreVersion(String version) {
-    UpdatePromptStore.setIgnoredVersion(_tryStore(), version);
+    UpdatePromptStore.setIgnoredVersion(trySettingsStore(ref), version);
     markPromptInteracted(targetVersion: version);
     clearPendingPrompt();
   }

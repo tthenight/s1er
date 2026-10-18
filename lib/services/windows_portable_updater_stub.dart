@@ -4,12 +4,16 @@ import '../models/app_exceptions.dart';
 class WindowsPortableUpdater {
   WindowsPortableUpdater({
     String Function()? resolvedExecutable,
-    int Function()? currentPid,
     Future<dynamic> Function()? temporaryDirectory,
-    Future<void> Function(String executable, List<String> arguments)?
-        spawnDetached,
+    Future<void> Function(String from, String to)? renameFile,
+    Future<void> Function(
+      String executable,
+      String workingDirectory,
+      String markerPath,
+    )? relaunch,
+    void Function(String directory)? setCurrentDirectory,
     void Function(int code)? exitApp,
-    Duration? spawnSettle,
+    Duration? startTimeout,
   });
 
   Future<void> applyDownloadedZip(String zipPath) async {

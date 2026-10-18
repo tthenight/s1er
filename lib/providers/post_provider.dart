@@ -7,6 +7,7 @@ import '../models/post.dart';
 import '../models/poll.dart';
 import '../models/thread_open_intent.dart';
 import '../services/api_service.dart';
+import '../services/discuz_parser.dart';
 import '../services/http_client.dart';
 import '../services/poll_vote_cache.dart';
 import '../services/rate_log_service.dart';
@@ -154,7 +155,7 @@ class PostNotifier extends AsyncNotifier<PostListState> {
         perPage: loaded.perPage,
       );
       final listLive = intent?.liveTotalReplies;
-      final needsCorrection = loaded.currentPage < targetPage &&
+      final needsCorrection = loaded.currentPage != targetPage &&
           (listLive == null || listLive < loaded.totalReplies);
       if (needsCorrection) {
         loaded = await _loadPage(targetPage);
@@ -246,7 +247,7 @@ class PostNotifier extends AsyncNotifier<PostListState> {
     int page, {
     List<Post>? posts,
   }) {
-    final parsedPosts = posts ?? ApiService.parsePostList(result);
+    final parsedPosts = posts ?? DiscuzParser.parsePostList(result);
     final variables = result['Variables'] as Map<String, dynamic>? ?? {};
     final thread = variables['thread'] as Map<String, dynamic>? ?? {};
     final perPage = int.tryParse(variables['ppp']?.toString() ?? '') ??
@@ -268,7 +269,7 @@ class PostNotifier extends AsyncNotifier<PostListState> {
       perPage: perPage,
       totalReplies: totalReplies,
       poll: page == 1
-          ? _pollWithUserVotes(variables, ApiService.parsePoll(result))
+          ? _pollWithUserVotes(variables, DiscuzParser.parsePoll(result))
           : null,
       filterAuthorId: _filterAuthorId,
       filterAuthorName: _filterAuthorName,

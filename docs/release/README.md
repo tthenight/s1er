@@ -175,9 +175,35 @@ Android（非 Play）升级 Dialog：
 产物仍是 `s1er-…-windows-x64.zip`（解压后运行 `s1er.exe`）。客户端在 Windows 上若清单含合法 `channels.windows` `.zip` 直链，升级 Dialog 的主按钮为 **立即更新**：
 
 1. 应用内下载 ZIP（与 Android 相同的「收满即结束」逻辑）
-2. 解压到临时目录，确认包内有合法的 `s1er.exe`（PE 头）
-3. 拉起脚本：等待当前进程退出并解锁 → 把安装目录改名为 `*.s1er-bak`（`$backupReady`），把新目录移到原路径 → 以安装目录为工作目录启动新 `s1er.exe` → 删除备份和临时文件（ZIP / 解压目录 / 脚本）
-4. 任一失败（进程超时、exe 仍被锁定、rename/move 失败、新 exe 缺失）都会保留原安装目录或从 `.s1er-bak` 回滚、拉起旧程序，并清理临时文件；rename 尚未成功时**不会**删除当前安装目录。日志写在 `%TEMP%\s1er-update.log`
-5. 用户数据在 `%APPDATA%`，不在安装目录里，覆盖程序文件不会清登录态
+2. 解压到安装目录内的 `.s1er-staging`，确认包内有合法的 `s1er.exe`（PE 头）
+3. **逐文件热替换**（不依赖 PowerShell / 外部脚本 / 辅助进程）：把当前工作目录移出安装目录 → 新包每个文件先让位（旧文件改名为 `*.s1erold`）再就位 → 以安装目录为工作目录 detached 拉起新 `s1er.exe` → **等新进程写「已启动」标记**（`main()` 早期写入，见下）后才 `exit(0)`
+   - 之所以是「文件级」而非「整目录对换」：Windows 上运行中的 exe / DLL **文件**可以改名（但所在**目录**不能改名，实测 `Access denied`），因此由运行中的旧进程**自己**完成覆盖，无需 PowerShell、无需等它退出、无重启空窗
+   - ⚠️ **前提**：该方案假定运行中的 `s1er.exe` 与已加载 DLL（含 `data/icudtl.dat`）可改名。这是 Windows 通用行为，但未在 s1er 自身产物上逐文件验证；若个别文件被占用，本次更新会整体回滚并报错（不会破坏安装目录）
+4. 任一步失败（文件被占用、**新版本启动超时/未能运行**）都会**整体回滚**：删掉已就位的新文件与本次新建的空目录、把 `*.s1erold` 改回原名，当前进程继续运行并报错；下次启动 best-effort 清掉残留
+5. 更新失败的版本会记入设置（版本 + 原因）；冷启动自动检查对该版本**退避**（不再反复弹），关于页「检查更新」手动仍会展示并带上原因。**下载**失败不记入退避（与应用无关），仅提示
+6. 用户数据在 `%APPDATA%`，不在安装目录里，覆盖程序文件不会清登录态
 
-下次点更新时会先清掉上次留下的 `s1er-update-extract-*` 和覆盖脚本。失败时仍可「浏览器打开」ZIP。调试/`build\windows\runner` 开发目录、以及没有写入权限的目录（如 Program Files）会拒绝覆盖。
+下次点更新时会先清掉上次留下的 `*.s1erold` 与 `.s1er-staging*`。失败时仍可「浏览器打开」ZIP 手动解压覆盖。调试/`build\windows\runner` 开发目录、以及没有写入权限的目录（如 Program Files）会拒绝覆盖。
+
+「已启动」标记经环境变量 `S1ER_STARTED_MARKER` 传给新进程，由 `lib/utils/update_startup_marker.dart` 在 `main()` 首行写入。
+
+### 本地端到端测试覆盖更新（不触碰线上）
+
+要在**不影响线上发布**的前提下点完整「立即更新」流程，用本地逃生阀 + 本地服务器：
+
+```powershell
+# ① 构建 profile/debug 包（注入本地清单地址与逃生阀）+ 打包 zip + 拷到普通目录
+pwsh -File scripts/test_update_local.ps1 -Mode profile
+# ② 起本地升级服务器（提供 latest.json 与 zip）
+dart run scripts/serve_update_local.dart --zip dist\local-update-test\s1er-0.9.0-windows-x64.zip --version 0.9.0 --port 8099
+# ③ 直接运行安装目录里的 exe（不是 flutter run——debug 包在 build\ 下会被拒）
+& dist\local-update-test\install\s1er.exe
+```
+
+然后 关于 → 检查更新 → 立即更新，观察是否闪一下即重启到新版。
+
+安全边界：
+
+- 逃生阀 `UPDATE_ALLOW_LOCAL_HOST` **仅 debug/profile 生效**（`kReleaseMode` 为真时恒关闭），且只放行环回主机 `127.0.0.1`/`localhost`/`::1` 的 `http`；release 发布包即使被传入该 define 也不会放行本地主机。
+- 主清单指向环回地址时，客户端**不再并发线上备用源**，避免真实网络干扰本地验证。
+- 全程只连本机，不请求 GitHub / jsDelivr / 论坛。
