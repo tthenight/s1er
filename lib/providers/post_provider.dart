@@ -234,6 +234,18 @@ class PostNotifier extends AsyncNotifier<PostListState> {
     return loaded;
   }
 
+  /// 是否允许回复。
+  ///
+  /// `closed` 是两版 API 都稳定给出的开关（1 = 已关闭），优先按它否决；
+  /// `allowreply` 在 v4 / v1 下都常为空，有值时再补一刀。两者都缺失时
+  /// 保持可回复，与历史行为一致。
+  static bool _resolveAllowReply(Map<String, dynamic> thread) {
+    if (thread['closed']?.toString() == '1') return false;
+    final allowReply = thread['allowreply']?.toString().trim() ?? '';
+    if (allowReply.isEmpty) return true;
+    return allowReply != '0';
+  }
+
   /// 打开置顶帖时对齐 live / lastSeen（不碰阅读记录）。
   void _syncSeenRepliesAfterLoad(PostListState loaded) {
     if (!ref.mounted) return;
@@ -255,7 +267,7 @@ class PostNotifier extends AsyncNotifier<PostListState> {
     final totalReplies = int.tryParse(thread['replies']?.toString() ?? '') ?? 0;
     final totalPosts = totalReplies + 1;
     final totalPages = (totalPosts / perPage).ceil().clamp(1, 9999);
-    final allowReply = thread['allowreply']?.toString() != '0';
+    final allowReply = _resolveAllowReply(thread);
     final threadSpecial =
         int.tryParse(thread['special']?.toString() ?? '') ?? 0;
 
@@ -316,7 +328,11 @@ class PostNotifier extends AsyncNotifier<PostListState> {
     return true;
   }
 
-  Future<void> goToPage(int page) async {
+  /// 翻到指定页。
+  ///
+  /// 失败时回退到原页并返回 `false`：调用方必须据此中止后续动作（改路由、
+  /// 写页码），否则会出现「页码变了、内容还是上一页」且没有任何提示。
+  Future<bool> goToPage(int page) async {
     final previous = state.asData?.value;
     state = await AsyncValue.guard(() async {
       final loaded = await _loadPage(page);
@@ -325,9 +341,11 @@ class PostNotifier extends AsyncNotifier<PostListState> {
         clearLocateError: true,
       );
     });
-    if (state.hasError && previous != null) {
+    if (!state.hasError) return true;
+    if (previous != null) {
       state = AsyncValue.data(previous);
     }
+    return false;
   }
 
   void clearOpenScrollTarget() {
