@@ -48,7 +48,13 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # 必须锁死具体版本，且不要写 channel：
+          # flutter-action 的规则是 channel 优先于 flutter-version，
+          # 一旦写 channel: stable 就会装 stable 最新版。2026-11-12 发布的
+          # Flutter 3.50.0 在 `flutter build ios --no-codesign` 下会误报
+          # 「requires a selected Development Team」，导致构建必然失败。
+          # 3.47.9 是本仓库验证通过、且上游 CI 使用的 SDK。
+          flutter-version: '3.47.9'
           cache: true
 
       - name: Flutter version
