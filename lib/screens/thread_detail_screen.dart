@@ -1,3 +1,4 @@
+import '../widgets/s1_ink_well.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import '../providers/auth_provider.dart';
 import '../providers/reading_history_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/thread_open_intent_provider.dart';
+import '../providers/thread_rate_logs_provider.dart';
 import '../utils/compose_img_tags.dart';
 import '../utils/quote_snapshot_store.dart';
 import '../widgets/app_bar_more_menu.dart';
@@ -941,6 +943,21 @@ class _ThreadDetailScreenState extends ConsumerState<ThreadDetailScreen> {
     );
   }
 
+  Future<void> _openRateLog(Post post) async {
+    final notifier = ref.read(threadRateLogsProvider(widget.tid).notifier);
+    final key = (widget.tid, post.pid);
+    final ok = await notifier.ensureRateLog(post.pid);
+    if (!mounted) return;
+    if (!ok) {
+      S1SnackBar.error(context, message: '加载评分失败，请稍后重试');
+      return;
+    }
+    final log = ref.read(rateLogProvider(key));
+    if (log == null || log.isEmpty) {
+      S1SnackBar.show(context, message: '该楼暂无评分记录');
+    }
+  }
+
   Future<void> _openReportDialog(Post post, PostListState state) async {
     if (!ref.read(authStateProvider).isLoggedIn) return;
     await showReportDialog(
@@ -1052,6 +1069,7 @@ class _ThreadDetailScreenState extends ConsumerState<ThreadDetailScreen> {
       onShareSelectToggle: () => _toggleShareFloor(post, displayFloor),
       onEdit: () => _openEdit(state, post),
       onRate: () => _openRateDialog(post),
+      onViewRates: () => _openRateLog(post),
       onAddToBlacklist: () => _confirmAddToBlacklist(post),
       onReport: () => _openReportDialog(post, state),
     );
@@ -1525,16 +1543,18 @@ class _ThreadDetailScreenState extends ConsumerState<ThreadDetailScreen> {
                       onScrollEnd: _onScrollEndRecordProgress,
                       child: Scrollbar(
                         controller: scrollController,
-                        child: _shareSelectMode
-                            ? list
-                            : RefreshIndicator(
-                                onRefresh: () => S1Haptics.wrapRefresh(
-                                  () => ref
-                                      .read(postProvider(widget.tid).notifier)
-                                      .refresh(),
-                                ),
-                                child: list,
-                              ),
+                        // 多选模式仍保留 RefreshIndicator，只关掉下拉触发：
+                        // 换掉外层 Widget 会重建 Scrollable，滚动位置归零。
+                        child: RefreshIndicator(
+                          notificationPredicate: (notification) =>
+                              !_shareSelectMode && notification.depth == 0,
+                          onRefresh: () => S1Haptics.wrapRefresh(
+                            () => ref
+                                .read(postProvider(widget.tid).notifier)
+                                .refresh(),
+                          ),
+                          child: list,
+                        ),
                       ),
                     );
                   },
@@ -1735,6 +1755,7 @@ class _ThreadDetailPostTile extends ConsumerWidget {
     required this.onShareSelectToggle,
     required this.onEdit,
     required this.onRate,
+    required this.onViewRates,
     required this.onAddToBlacklist,
     required this.onReport,
     this.highlightQuery,
@@ -1757,6 +1778,7 @@ class _ThreadDetailPostTile extends ConsumerWidget {
   final VoidCallback onShareSelectToggle;
   final VoidCallback onEdit;
   final VoidCallback onRate;
+  final VoidCallback onViewRates;
   final VoidCallback onAddToBlacklist;
   final VoidCallback onReport;
   final String? highlightQuery;
@@ -1823,6 +1845,7 @@ class _ThreadDetailPostTile extends ConsumerWidget {
         onShareSelectToggle: onShareSelectToggle,
         onEdit: canEdit ? onEdit : null,
         onRate: canRate ? onRate : null,
+        onViewRates: onViewRates,
         onAddToBlacklist: canAddToBlacklist ? onAddToBlacklist : null,
         onReport: isLoggedIn ? onReport : null,
       ),
@@ -1864,7 +1887,7 @@ class _BlockedPostPlaceholder extends ConsumerWidget {
         context,
         enabled: compactListFullBleed,
       ),
-      child: InkWell(
+      child: S1InkWell(
         onTap: onExpand,
         borderRadius: S1ReadingCardStyle.inkBorderRadius(
           context,

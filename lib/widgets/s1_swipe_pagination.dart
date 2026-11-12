@@ -478,34 +478,32 @@ class S1SwipePaginationState extends State<S1SwipePagination> {
   }
 
   Widget _buildSinglePageBody(BuildContext context) {
-    Widget body = S1ScrollBoundaryListener(
-      isTerminal: true,
+    // 始终套 [S1TerminalLeftSwipe]：按 onRefresh 增删会让子树重建，
+    // 列表滚动位置随之归零（如进入多选分享模式时）。
+    return S1TerminalLeftSwipe(
+      scrollController: _scrollController,
       feedback: _boundaryFeedback,
       onRefresh: widget.onTerminalRefresh,
-      child: widget.pageBuilder(context, _scrollController),
-    );
-    final onRefresh = widget.onTerminalRefresh;
-    if (onRefresh != null) {
-      body = S1TerminalLeftSwipe(
-        scrollController: _scrollController,
+      child: S1ScrollBoundaryListener(
+        isTerminal: true,
         feedback: _boundaryFeedback,
-        onRefresh: onRefresh,
-        child: body,
-      );
-    }
-    if (_useLeadingEdgeBack(context)) {
-      body = Stack(
-        fit: StackFit.expand,
-        children: [body, _buildLeadingEdgeBackStrip(context)],
-      );
-    }
-    return body;
+        onRefresh: widget.onTerminalRefresh,
+        child: widget.pageBuilder(context, _scrollController),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_usePageView) {
-      return _buildSinglePageBody(context);
+      final body = _buildSinglePageBody(context);
+      if (_useLeadingEdgeBack(context)) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [body, _buildLeadingEdgeBackStrip(context)],
+        );
+      }
+      return body;
     }
     return _buildPagedBody(context);
   }
