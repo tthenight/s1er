@@ -77,6 +77,11 @@ class BbcodeRenderer extends ConsumerWidget {
     this.stripSpecialStyles = false,
     this.attachments = const {},
     this.quoteJumpEnabled = true,
+    this.bodyFontSize,
+    this.imageMargin,
+    this.blockImageAlignment = Alignment.center,
+    this.showImageBorder = true,
+    this.zeroBodyMargin = false,
   });
 
   final String bbcode;
@@ -102,6 +107,22 @@ class BbcodeRenderer extends ConsumerWidget {
 
   /// 为 false 时引用头不显示跳转图标、不响应点击（分享卡等静态导出）。
   final bool quoteJumpEnabled;
+
+  /// 覆盖正文字号（如分享卡使用 `ShareCard.shareBodySize`）；默认 null 走
+  /// [S1Typography.defaultBodySize]。
+  final double? bodyFontSize;
+
+  /// 覆盖块级图片外边距（默认 `EdgeInsets.symmetric(vertical: 8)`）。
+  final EdgeInsetsGeometry? imageMargin;
+
+  /// 块级图片在内容栏内的对齐方式（默认居中；分享卡左对齐正文边缘）。
+  final AlignmentGeometry blockImageAlignment;
+
+  /// 为 false 时省略块级图片 1px 描边（分享卡去框用）。
+  final bool showImageBorder;
+
+  /// 为 true 时清零 `flutter_html` 默认 `body` 8px 外边距，使正文与外层左边界严格对齐。
+  final bool zeroBodyMargin;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -222,6 +243,11 @@ class BbcodeRenderer extends ConsumerWidget {
           highlightQuery: highlightQuery,
           stripSpecialStyles: stripSpecialStyles,
           quoteJumpEnabled: quoteJumpEnabled,
+          bodyFontSize: bodyFontSize,
+          imageMargin: imageMargin,
+          blockImageAlignment: blockImageAlignment,
+          showImageBorder: showImageBorder,
+          zeroBodyMargin: zeroBodyMargin,
         ),
       );
     }
@@ -289,6 +315,11 @@ class _MemoizedHtmlBlock extends StatefulWidget {
     this.highlightQuery,
     this.stripSpecialStyles = false,
     this.quoteJumpEnabled = true,
+    this.bodyFontSize,
+    this.imageMargin,
+    this.blockImageAlignment = Alignment.center,
+    this.showImageBorder = true,
+    this.zeroBodyMargin = false,
   });
 
   final String html;
@@ -302,6 +333,11 @@ class _MemoizedHtmlBlock extends StatefulWidget {
   final String? highlightQuery;
   final bool stripSpecialStyles;
   final bool quoteJumpEnabled;
+  final double? bodyFontSize;
+  final EdgeInsetsGeometry? imageMargin;
+  final AlignmentGeometry blockImageAlignment;
+  final bool showImageBorder;
+  final bool zeroBodyMargin;
   @override
   State<_MemoizedHtmlBlock> createState() => _MemoizedHtmlBlockState();
 }
@@ -339,7 +375,12 @@ class _MemoizedHtmlBlockState extends State<_MemoizedHtmlBlock> {
         widget.imagesExpanded != _cachedImagesExpanded ||
         widget.highlightQuery != _cachedHighlightQuery ||
         widget.stripSpecialStyles != _cachedStripSpecialStyles ||
-        widget.quoteJumpEnabled != oldWidget.quoteJumpEnabled) {
+        widget.quoteJumpEnabled != oldWidget.quoteJumpEnabled ||
+        widget.bodyFontSize != oldWidget.bodyFontSize ||
+        widget.imageMargin != oldWidget.imageMargin ||
+        widget.blockImageAlignment != oldWidget.blockImageAlignment ||
+        widget.showImageBorder != oldWidget.showImageBorder ||
+        widget.zeroBodyMargin != oldWidget.zeroBodyMargin) {
       _cachedHtml = widget.html;
       _cachedShowImages = widget.showImages;
       _cachedMaxImages = widget.maxImagesPerPost;
@@ -388,12 +429,21 @@ class _MemoizedHtmlBlockState extends State<_MemoizedHtmlBlock> {
     if (highlight != null && highlight.trim().isNotEmpty) {
       html = PageSearch.highlightHtml(html, highlight);
     }
+    // flutter_html 的根节点不匹配 style map 里的 'body'（根样式直接取自
+    // theme.textTheme.bodyMedium），因此正文样式挂在一个显式包裹的类上。
+    html = '<div class="s1-body">$html</div>';
     final profileDetail = 'links=${_countAnchors(html)} len=${html.length}';
     final textTheme = Theme.of(context).textTheme;
-    final bodySize = S1Typography.bodySize(textTheme);
+    // 阅读正文取固定排版 token，不读 bodyMedium.fontSize（ADR 0011 决策 4）；
+    // 分享卡等显式传入 [bodyFontSize] 时覆盖。
+    final bodySize =
+        widget.bodyFontSize ?? S1Typography.defaultBodySize.toDouble();
+    final blockImageMargin =
+        widget.imageMargin ?? const EdgeInsets.symmetric(vertical: 8);
     final codeSize = S1Typography.codeSize(textTheme);
-    final bodyLineHeight = S1Typography.bodyLineHeight(textTheme);
-    final codeFontFamily = textTheme.bodySmall?.fontFamily ?? 'monospace';
+    // 等宽族不能从 textTheme 取：桌面主题族已被钉成 CJK 无衬线，
+    // `bodySmall.fontFamily ?? 'monospace'` 的 `??` 永不命中。
+    final codeFallback = S1Fonts.monoFallback(textTheme.bodyMedium?.fontFamily);
 
     bool shouldShowPostImage(int index) {
       if (!showImages) return false;
@@ -402,9 +452,14 @@ class _MemoizedHtmlBlockState extends State<_MemoizedHtmlBlock> {
     }
 
     final style = {
-      'body': Style(
+      if (widget.zeroBodyMargin)
+        'body': Style(
+          margin: Margins.zero,
+          padding: HtmlPaddings.zero,
+        ),
+      '.s1-body': Style(
         fontSize: FontSize(bodySize),
-        lineHeight: LineHeight.number(bodyLineHeight),
+        lineHeight: const LineHeight(S1Typography.readingLineHeight),
         margin: Margins.zero,
         padding: HtmlPaddings.zero,
         color: scheme.onSurface,
@@ -423,7 +478,8 @@ class _MemoizedHtmlBlockState extends State<_MemoizedHtmlBlock> {
         backgroundColor: scheme.surfaceContainerHighest,
         padding: HtmlPaddings.all(12),
         margin: Margins.symmetric(vertical: 8),
-        fontFamily: codeFontFamily,
+        fontFamily: S1Fonts.monoFamily,
+        fontFamilyFallback: codeFallback.isEmpty ? null : codeFallback,
         fontSize: FontSize(codeSize),
         display: Display.block,
       ),
@@ -492,9 +548,10 @@ class _MemoizedHtmlBlockState extends State<_MemoizedHtmlBlock> {
             return ImageViewer(
               imageUrl: preview,
               fullImageUrl: full,
-              showBorder: true,
-              margin: const EdgeInsets.symmetric(vertical: 8),
+              showBorder: widget.showImageBorder,
+              margin: blockImageMargin,
               deferUntilVisible: widget.deferImages,
+              blockAlignment: widget.blockImageAlignment,
             );
           }
 
@@ -551,9 +608,10 @@ class _MemoizedHtmlBlockState extends State<_MemoizedHtmlBlock> {
           return ImageViewer(
             imageUrl: urls.previewUrl,
             fullImageUrl: urls.fullUrl,
-            showBorder: true,
-            margin: const EdgeInsets.symmetric(vertical: 8),
+            showBorder: widget.showImageBorder,
+            margin: blockImageMargin,
             deferUntilVisible: widget.deferImages,
+            blockAlignment: widget.blockImageAlignment,
           );
         },
       ),
